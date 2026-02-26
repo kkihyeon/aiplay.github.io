@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AI 픽셀 사진기 - 멀티 디바이스 대응</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.min.js"></script>
+    <script src="https://unpkg.com/ml5@0.6.0/dist/ml5.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+        body { background-color: #f8fafc; font-family: 'Pretendard', sans-serif; margin: 0; padding: 0; -webkit-touch-callout: none; user-select: none; }
+        .canvas-wrapper { position: relative; width: 100%; border-radius: 1.5rem; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); background: #000; line-height: 0; }
+        canvas { display: block; width: 100% !important; height: auto !important; }
+        .mode-btn { transition: all 0.2s; border: 2px solid #e2e8f0; background: white; }
+        .mode-btn.active { background-color: #4f46e5; color: white; border-color: #4338ca; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3); }
+        .color-dot { width: 40px; height: 40px; border-radius: 10px; cursor: pointer; border: 3px solid transparent; flex-shrink: 0; }
+        .color-dot.selected { border-color: #0f172a; transform: scale(1.1); }
+        #loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: white; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100; }
+    </style>
+</head>
+<body class="p-4 pb-24">
+    <div id="loading-overlay">
+        <div class="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mb-4"></div>
+        <p class="font-bold text-slate-800">카메라와 AI 연결 중...</p>
+    </div>
+
+    <div class="max-w-md mx-auto">
+        <header class="text-center mb-6">
+            <h1 class="text-3xl font-black text-indigo-600 mb-1 tracking-tighter">🎨 AI 픽셀 사진기</h1>
+            <p class="text-slate-500 font-medium text-sm">기기 맞춤형 화면 비율 적용 완료</p>
+        </header>
+
+        <div class="flex justify-center mb-6 gap-2 bg-white p-2 rounded-2xl shadow-sm">
+            <button id="mode-headband" class="mode-btn active flex-1 py-3 rounded-xl font-bold">👑 머리띠</button>
+            <button id="mode-mask" class="mode-btn flex-1 py-3 rounded-xl font-bold">🎭 마스크</button>
+        </div>
+
+        <div class="space-y-6">
+            <!-- 1. 그림판 -->
+            <div>
+                <div class="flex justify-between items-center mb-2 px-1">
+                    <span class="text-xs font-black text-slate-500">그림 그리기 (32x32)</span>
+                    <button id="clear-btn" class="text-xs font-bold text-red-500">전체 삭제</button>
+                </div>
+                <div id="canvas-pixel" class="canvas-wrapper"></div>
+                <div class="mt-4 bg-white p-4 rounded-3xl shadow-md border border-slate-50">
+                    <div class="flex overflow-x-auto gap-2 pb-4" id="palette"></div>
+                    <div class="flex gap-2">
+                        <button id="eraser-btn" class="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl font-black">🧽 지우개</button>
+                        <button id="capture-btn" class="flex-[1.5] py-4 bg-indigo-600 text-white rounded-2xl font-black shadow-lg shadow-indigo-100">📸 사진 찍기</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. AI 카메라 -->
+            <div>
+                <div class="flex justify-between items-center mb-2 px-1">
+                    <div class="flex items-center gap-2">
+                        <div id="status-dot" class="w-2 h-2 bg-orange-500 rounded-full animate-pulse"></div>
+                        <span id="status-msg" class="text-xs font-black text-orange-600 uppercase">AI 준비 중</span>
+                    </div>
+                </div>
+                <div id="canvas-ai" class="canvas-wrapper"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const gridSize = 32;
+        let pixelGrid = Array(gridSize).fill().map(() => Array(gridSize).fill(null));
+        let currentColor = '#4F46E5';
+        let isEraser = false;
+        let currentMode = 'headband';
+
+        const colors = ['#EF4444', '#F97316', '#F59E0B', '#10B981', '#3B82F6', '#6366F1', '#A855F7', '#EC4899', '#000000', '#FFFFFF'];
+        const paletteDiv = document.getElementById('palette');
+        const eraserBtn = document.getElementById('eraser-btn');
+
+        colors.forEach(c => {
+            const div = document.createElement('div');
+            div.className = `color-dot ${c === '#4F46E5' ? 'selected' : ''}`;
+            div.style.backgroundColor = c;
+            div.onclick = () => {
+                currentColor = c; isEraser = false;
+                document.querySelectorAll('.color-dot').forEach(d => d.classList.remove('selected'));
+                div.classList.add('selected');
+                eraserBtn.classList.remove('ring-4', 'ring-indigo-200');
+            };
+            paletteDiv.appendChild(div);
+        });
+
+        eraserBtn.onclick = () => {
+            isEraser = true;
+            document.querySelectorAll('.color-dot').forEach(d => d.classList.remove('selected'));
+            eraserBtn.classList.add('ring-4', 'ring-indigo-200');
+        };
+
+        const setMode = (mode) => {
+            currentMode = mode;
+            document.getElementById('mode-headband').classList.toggle('active', mode === 'headband');
+            document.getElementById('mode-mask').classList.toggle('active', mode === 'mask');
+        };
+        document.getElementById('mode-headband').onclick = () => setMode('headband');
+        document.getElementById('mode-mask').onclick = () => setMode('mask');
+
+        const pixelSketch = (p) => {
+            let cellSize;
+            p.setup = () => {
+                let w = Math.min(window.innerWidth - 32, 416);
+                cellSize = w / gridSize;
+                p.createCanvas(w, w);
+            };
+            p.draw = () => {
+                p.background(255);
+                p.drawGuide();
+                p.stroke(245); p.strokeWeight(0.5);
+                for(let i=0; i<=gridSize; i++) {
+                    p.line(i*cellSize, 0, i*cellSize, p.height);
+                    p.line(0, i*cellSize, p.width, i*cellSize);
+                }
+                for(let x=0; x<gridSize; x++) {
+                    for(let y=0; y<gridSize; y++) {
+                        if(pixelGrid[x][y]) {
+                            p.noStroke(); p.fill(pixelGrid[x][y]);
+                            p.rect(x*cellSize, y*cellSize, cellSize, cellSize);
+                        }
+                    }
+                }
+                if (p.mouseIsPressed && p.mouseX > 0 && p.mouseX < p.width && p.mouseY > 0 && p.mouseY < p.height) {
+                    let x = Math.floor(p.mouseX / cellSize);
+                    let y = Math.floor(p.mouseY / cellSize);
+                    if (x >= 0 && x < gridSize && y >= 0 && y < gridSize) {
+                        pixelGrid[x][y] = isEraser ? null : currentColor;
+                    }
+                }
+            };
+            p.drawGuide = () => {
+                p.noStroke(); p.fill(248);
+                if (currentMode === 'headband') {
+                    p.rect(6*cellSize, 26*cellSize, 8*cellSize, 1.5*cellSize, 6);
+                    p.rect(18*cellSize, 26*cellSize, 8*cellSize, 1.5*cellSize, 6);
+                    p.arc(16*cellSize, 36*cellSize, 28*cellSize, 20*cellSize, p.PI, p.TWO_PI);
+                } else {
+                    p.ellipse(10*cellSize, 15*cellSize, 6*cellSize, 4*cellSize);
+                    p.ellipse(22*cellSize, 15*cellSize, 6*cellSize, 4*cellSize);
+                    p.rect(14*cellSize, 17*cellSize, 4*cellSize, 6*cellSize, 10);
+                    p.ellipse(16*cellSize, 27*cellSize, 10*cellSize, 5*cellSize);
+                }
+            };
+            document.getElementById('clear-btn').onclick = () => pixelGrid = Array(gridSize).fill().map(() => Array(gridSize).fill(null));
+        };
+        new p5(pixelSketch, 'canvas-pixel');
+
+        const aiSketch = (p) => {
+            let video; let faceMesh; let predictions = [];
+            let videoScale = 1; let offsetX = 0; let offsetY = 0;
+
+            p.setup = () => {
+                let w = Math.min(window.innerWidth - 32, 416);
+                p.createCanvas(w, w); // 1:1 비율 고정
+
+                const constraints = {
+                    video: { facingMode: "user" },
+                    audio: false
+                };
+
+                video = p.createCapture(constraints, () => {
+                    console.log("Video Ready");
+                });
+                video.elt.setAttribute('playsinline', '');
+                video.elt.muted = true;
+                video.hide();
+
+                faceMesh = ml5.facemesh(video, () => {
+                    document.getElementById('status-msg').innerText = "LIVE 인식 중";
+                    document.getElementById('status-msg').classList.replace('text-orange-600', 'text-green-600');
+                    document.getElementById('status-dot').classList.replace('bg-orange-500', 'bg-green-500');
+                    document.getElementById('loading-overlay').style.display = 'none';
+                });
+                faceMesh.on("predict", r => predictions = r);
+            };
+
+            p.draw = () => {
+                if (!video.elt.videoWidth) return;
+
+                // 찌그러짐 방지 비율 계산 (Center Crop)
+                let vW = video.elt.videoWidth;
+                let vH = video.elt.videoHeight;
+                let scale = Math.max(p.width / vW, p.height / vH);
+                let rW = vW * scale;
+                let rH = vH * scale;
+                offsetX = (p.width - rW) / 2;
+                offsetY = (p.height - rH) / 2;
+
+                // 1. 비디오만 반전해서 그리기
+                p.push();
+                p.translate(p.width, 0);
+                p.scale(-1, 1);
+                p.image(video, -offsetX, offsetY, rW, rH);
+                p.pop();
+
+                // 2. 픽셀 마스크 투영 (그림은 반전하지 않음)
+                if (predictions.length > 0) {
+                    predictions.forEach(face => {
+                        let scaledMesh = face.scaledMesh;
+                        let target = (currentMode === 'headband') ? scaledMesh[10] : scaledMesh[168];
+                        let leftSide = scaledMesh[234], rightSide = scaledMesh[454];
+                        let faceDist = p.dist(leftSide[0], leftSide[1], rightSide[0], rightSide[1]);
+                        
+                        // 거울 반전된 화면의 X 좌표 계산: CanvasWidth - (VideoX * Scale + OffsetX)
+                        let drawX = p.width - (target[0] * scale + offsetX);
+                        let drawY = target[1] * scale + offsetY;
+
+                        p.push();
+                        p.translate(drawX, drawY);
+                        
+                        // 얼굴 크기에 비례한 픽셀 아트 스케일
+                        let s = (faceDist * scale) / (gridSize * (p.width/gridSize)) * 1.6;
+                        p.scale(s);
+
+                        if(currentMode === 'headband') p.translate(-(gridSize * (p.width/gridSize))/2, -(gridSize * (p.width/gridSize)) * 0.95);
+                        else p.translate(-(gridSize * (p.width/gridSize))/2, -(gridSize * (p.width/gridSize)) * 0.47);
+
+                        // 픽셀 그리기 (정방향)
+                        let drawCell = p.width/gridSize;
+                        for(let x=0; x<gridSize; x++) {
+                            for(let y=0; y<gridSize; y++) {
+                                if(pixelGrid[x][y]) {
+                                    p.noStroke(); p.fill(pixelGrid[x][y]);
+                                    p.rect(x*drawCell, y*drawCell, drawCell, drawCell);
+                                }
+                            }
+                        }
+                        p.pop();
+                    });
+                }
+            };
+            document.getElementById('capture-btn').onclick = () => p.saveCanvas('my_ai_pixel_art', 'png');
+        };
+        new p5(aiSketch, 'canvas-ai');
+    </script>
+</body>
+</html>
