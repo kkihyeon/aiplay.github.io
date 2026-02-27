@@ -63,7 +63,7 @@
     <div class="max-w-xl mx-auto">
         <header class="text-center mb-8 pt-4">
             <h1 class="text-3xl font-black text-slate-900 mb-1 tracking-tighter">🎨 AI 픽셀 사진기</h1>
-            <p class="text-slate-500 font-semibold italic text-sm">멋진 가면을 만들어봐요!</p>
+            <p class="text-slate-500 font-semibold italic text-sm">멋진 마스크를 만들어봐요!</p>
         </header>
 
         <div class="flex justify-center mb-8">
@@ -97,15 +97,15 @@
                         <div id="status-dot" class="w-3 h-3 bg-orange-500 rounded-full animate-pulse"></div>
                         <span id="status-msg" class="text-sm font-black text-orange-600 tracking-tight">AI 얼굴 찾는 중...</span>
                     </div>
-                    <span class="text-xs font-bold text-slate-300 italic">MIRROR MODE</span>
+                    <span class="text-xs font-bold text-slate-300 italic">카메라 화면</span>
                 </div>
                 <div id="canvas-ai"></div>
                 
                 <div class="mt-8 p-6 bg-white rounded-[2rem] border-l-[10px] border-indigo-500 shadow-sm w-full">
                     <h5 class="font-black text-slate-800 mb-2">✨ 실시간 변신 가이드</h5>
                     <p class="text-slate-600 text-sm leading-relaxed">
-                        화면 아래의 <b>거울</b>을 보며 위치를 맞춰보세요! <br>
-                        그림판에서 수정한 내용이 실시간으로 얼굴에 반영됩니다.
+                        화면 아래의 <b>카메라</b>을 보며 위치를 맞춰보세요! <br>
+                        그림판에서 그린 머리띠/마스크가 실시간으로 얼굴에 반영됩니다.
                     </p>
                 </div>
             </div>
@@ -195,10 +195,10 @@
                     p.rect(18*cellSize, 26*cellSize, 8*cellSize, 1.5*cellSize, 6);
                     p.arc(16*cellSize, 36*cellSize, 28*cellSize, 20*cellSize, p.PI, p.TWO_PI);
                 } else {
-                    p.ellipse(10*cellSize, 15*cellSize, 6*cellSize, 4*cellSize);
-                    p.ellipse(22*cellSize, 15*cellSize, 6*cellSize, 4*cellSize);
-                    p.rect(14*cellSize, 17*cellSize, 4*cellSize, 6*cellSize, 10);
-                    p.ellipse(16*cellSize, 27*cellSize, 10*cellSize, 5*cellSize);
+                    p.ellipse(11*cellSize, 10*cellSize, 6*cellSize, 4*cellSize);
+                    p.ellipse(21*cellSize, 10*cellSize, 6*cellSize, 4*cellSize);
+                    p.rect(14*cellSize, 10*cellSize, 4*cellSize, 6*cellSize, 10);
+                    p.ellipse(16*cellSize, 20*cellSize, 10*cellSize, 5*cellSize);
                 }
             };
 
@@ -282,7 +282,7 @@
                         if(currentMode === 'headband') {
                             p.translate(-centerOff, -p.width * 0.95);
                         } else {
-                            p.translate(-centerOff, -p.width * 0.47);
+                            p.translate(-centerOff, -p.width * 0.27);
                         }
 
                         // 픽셀 렌더링
