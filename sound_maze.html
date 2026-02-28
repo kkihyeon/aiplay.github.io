@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AI 음성 미로 탈출</title>
+    <!-- p5.js 라이브러리 및 Tailwind CSS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+        body { background-color: #020617; font-family: 'Pretendard', sans-serif; color: white; margin: 0; overflow: hidden; }
+        #game-container { width: 100%; height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        canvas { border: 4px solid #1e293b; border-radius: 1rem; box-shadow: 0 0 40px rgba(56, 189, 248, 0.15); }
+        
+        /* 인식된 칸수 표시 애니메이션 */
+        #step-count-display {
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        .pop-effect { transform: scale(1.2); color: #38bdf8; font-weight: 900; }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <div class="mb-4 text-center">
+            <h1 class="text-3xl font-black tracking-tighter text-sky-400 mb-1 italic">🌀 음성 조작 미로 게임</h1>
+            <p class="text-slate-400 text-sm">"오른 세 칸", "위로 한 칸" 등 말해보세요!</p>
+        </div>
+
+        <!-- 미로 화면 -->
+        <div id="canvas-holder"></div>
+
+        <div class="mt-6 w-full max-w-md bg-slate-900/80 p-6 rounded-3xl border border-slate-800 backdrop-blur-md">
+            <!-- 음성 인식 피드백 UI -->
+            <div class="flex flex-col gap-4 mb-6">
+                <div class="flex justify-center items-center gap-3">
+                    <div id="cmd-up" class="px-3 py-1 bg-slate-800 rounded-md text-[10px] font-bold text-slate-500 uppercase border border-slate-700 transition-colors">위</div>
+                    <div id="cmd-down" class="px-3 py-1 bg-slate-800 rounded-md text-[10px] font-bold text-slate-500 uppercase border border-slate-700 transition-colors">아래</div>
+                    <div id="cmd-left" class="px-3 py-1 bg-slate-800 rounded-md text-[10px] font-bold text-slate-500 uppercase border border-slate-700 transition-colors">왼쪽</div>
+                    <div id="cmd-right" class="px-3 py-1 bg-slate-800 rounded-md text-[10px] font-bold text-slate-500 uppercase border border-slate-700 transition-colors">오른쪽</div>
+                    
+                    <!-- 칸수 표시 영역 -->
+                    <div class="ml-2 px-3 py-1 bg-sky-900/30 rounded-full border border-sky-500/30 flex items-center gap-1">
+                        <span id="step-count-display" class="text-sm font-black text-sky-400 leading-none">0</span>
+                        <span class="text-[10px] font-bold text-sky-600 uppercase pt-0.5">칸</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex justify-between items-center mb-4 px-1">
+                <div class="flex items-center gap-2">
+                    <div id="mic-dot" class="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
+                    <span id="mic-status" class="text-xs font-bold text-slate-400 uppercase">인식기 대기 중</span>
+                </div>
+                <!-- 마지막으로 인식된 전체 문구 -->
+                <div id="last-heard" class="text-sm font-black text-sky-500 italic">...</div>
+            </div>
+
+            <button id="start-btn" class="w-full py-4 bg-sky-600 hover:bg-sky-500 text-white font-black text-xl rounded-2xl shadow-lg transition-all active:scale-95">
+                게임 시작하기
+            </button>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * 게임 설정 및 변수
+         */
+        let maze;
+        let player;
+        const cols = 13; 
+        const rows = 13; 
+        let w, h; 
+        
+        let isPlaying = false;
+        let isCountingDown = false;
+        let isVictory = false;
+        let countdownValue = "";
+
+        // Web Speech API 엔진
+        let recognition;
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+        /**
+         * 음성 명령 사전
+         */
+        const voiceDict = {
+            up: ["위", "이", "의"],
+            down: ["아래", "아레", "알래", "알레", "알애", "아내", "아네", "아대", "아데"],
+            left: ["왼", "웬", "앤", "엔"],
+            right: ["오른쪽", "오른", "옳은", "올은", "오는", "올른", "오든", "어든", "어른", "얼은", "얼른", "얼음"]
+        };
+
+        /**
+         * 숫자 인식 사전
+         */
+        const numDict = {
+            "열": 10, "십": 10, "10": 10,
+            "아홉": 9, "구": 9, "9": 9,
+            "여덟": 8, "팔": 8, "8": 8,
+            "일곱": 7, "칠": 7, "7": 7,
+            "여섯": 6, "육": 6, "6": 6,
+            "다섯": 5, "오": 5, "5": 5,
+            "네": 4, "사": 4, "4": 4,
+            "세": 3, "삼": 3, "3": 3,
+            "두": 2, "이": 2, "2": 2,
+            "한": 1, "일": 1, "1": 1
+        };
+
+        // 숫자를 긴 글자순으로 정렬 (ex: '다섯'을 '오'보다 먼저 확인)
+        const sortedNumKeys = Object.keys(numDict).sort((a, b) => b.length - a.length);
+
+        function setup() {
+            let size = Math.min(window.innerWidth - 40, 400);
+            const canvas = createCanvas(size, size);
+            canvas.parent('canvas-holder');
+            
+            w = width / cols;
+            h = height / rows;
+
+            if (SpeechRecognition) {
+                recognition = new SpeechRecognition();
+                recognition.continuous = true;
+                recognition.interimResults = false;
+                recognition.lang = 'ko-KR';
+
+                recognition.onresult = (event) => {
+                    const result = event.results[event.results.length - 1][0].transcript.trim();
+                    handleVoiceCommand(result);
+                };
+
+                recognition.onerror = (event) => {
+                    console.error("음성 인식 오류:", event.error);
+                };
+            }
+
+            initGame();
+            frameRate(30);
+        }
+
+        function draw() {
+            background(15, 23, 42);
+
+            if (!isPlaying && !isCountingDown && !isVictory) {
+                drawStartScreen();
+                return;
+            }
+
+            if (isCountingDown && countdownValue !== "GO!" && !isPlaying) {
+                drawCountdown();
+                return;
+            }
+
+            maze.show();
+            player.show();
+
+            if (isCountingDown && countdownValue === "GO!") drawCountdown();
+            if (isVictory) drawVictoryOverlay();
+        }
+
+        /**
+         * 음성 명령 처리 (오인식 방지 로직 개선)
+         */
+        function handleVoiceCommand(word) {
+            if (!isPlaying) return;
+            
+            document.getElementById('last-heard').innerText = word;
+            resetCmdHighlights();
+
+            let dx = 0, dy = 0, cmdId = "";
+            let matchedKeyword = "";
+
+            // 1. 방향 먼저 찾기
+            if (voiceDict.up.some(v => { if(word.includes(v)) { matchedKeyword = v; return true; } return false; })) {
+                dy = -1; cmdId = "cmd-up";
+            } else if (voiceDict.down.some(v => { if(word.includes(v)) { matchedKeyword = v; return true; } return false; })) {
+                dy = 1; cmdId = "cmd-down";
+            } else if (voiceDict.left.some(v => { if(word.includes(v)) { matchedKeyword = v; return true; } return false; })) {
+                dx = -1; cmdId = "cmd-left";
+            } else if (voiceDict.right.some(v => { if(word.includes(v)) { matchedKeyword = v; return true; } return false; })) {
+                dx = 1; cmdId = "cmd-right";
+            }
+
+            if (cmdId === "") return; // 방향이 인식되지 않으면 무시
+
+            // 2. 인식된 방향 단어를 제거하여 숫자 오인식 방지 (ex: "오른" 제거 후 "세"만 남김)
+            let cleanWord = word.replace(matchedKeyword, "");
+
+            // 3. 정제된 단어에서 이동 횟수 분석
+            let moveCount = 1;
+            for (let key of sortedNumKeys) {
+                if (cleanWord.includes(key)) {
+                    moveCount = numDict[key];
+                    break; 
+                }
+            }
+
+            // UI 업데이트
+            const stepDisplay = document.getElementById('step-count-display');
+            stepDisplay.innerText = moveCount;
+            stepDisplay.classList.add('pop-effect');
+            setTimeout(() => stepDisplay.classList.remove('pop-effect'), 400);
+
+            // 4. 이동 실행
+            highlightCmd(cmdId);
+            for (let i = 0; i < moveCount; i++) {
+                player.move(dx, dy);
+            }
+
+            if (player.checkWin()) {
+                isVictory = true;
+                isPlaying = false;
+                document.getElementById('start-btn').innerText = "새 미로 만들기";
+            }
+        }
+
+        function highlightCmd(id) {
+            const el = document.getElementById(id);
+            el.classList.add('bg-sky-500', 'text-white', 'border-sky-400', 'shadow-[0_0_10px_rgba(56,189,248,0.5)]');
+            el.classList.remove('text-slate-500', 'bg-slate-800');
+            setTimeout(() => resetCmdHighlights(), 600);
+        }
+
+        function resetCmdHighlights() {
+            const ids = ["cmd-up", "cmd-down", "cmd-left", "cmd-right"];
+            ids.forEach(id => {
+                const el = document.getElementById(id);
+                el.classList.remove('bg-sky-500', 'text-white', 'border-sky-400', 'shadow-[0_0_10px_rgba(56,189,248,0.5)]');
+                el.classList.add('text-slate-500', 'bg-slate-800');
+            });
+        }
+
+        function initGame() {
+            maze = new Maze(cols, rows);
+            player = new Player(1, 1);
+            isVictory = false;
+            document.getElementById('step-count-display').innerText = "0";
+            document.getElementById('last-heard').innerText = "...";
+        }
+
+        class Maze {
+            constructor(cols, rows) {
+                this.grid = Array(rows).fill().map(() => Array(cols).fill(1));
+                this.generate();
+            }
+
+            generate() {
+                const stack = [];
+                const startX = 1, startY = 1;
+                this.grid[startY][startX] = 0;
+                stack.push({x: startX, y: startY});
+
+                while (stack.length > 0) {
+                    const current = stack[stack.length - 1];
+                    const neighbors = this.getNeighbors(current.x, current.y);
+
+                    if (neighbors.length > 0) {
+                        const next = neighbors[Math.floor(Math.random() * neighbors.length)];
+                        this.grid[next.y][next.x] = 0;
+                        this.grid[(current.y + next.y) / 2][(current.x + next.x) / 2] = 0;
+                        stack.push(next);
+                    } else {
+                        stack.pop();
+                    }
+                }
+                this.grid[rows - 2][cols - 2] = 2;
+            }
+
+            getNeighbors(x, y) {
+                const neighbors = [];
+                const dirs = [[0, -2], [0, 2], [-2, 0], [2, 0]];
+                for (let d of dirs) {
+                    const nx = x + d[0], ny = y + d[1];
+                    if (nx > 0 && nx < cols - 1 && ny > 0 && ny < rows - 1 && this.grid[ny][nx] === 1) {
+                        neighbors.push({x: nx, y: ny});
+                    }
+                }
+                return neighbors;
+            }
+
+            show() {
+                for (let j = 0; j < rows; j++) {
+                    for (let i = 0; i < cols; i++) {
+                        if (this.grid[j][i] === 1) {
+                            fill(30, 41, 59);
+                            noStroke();
+                            rect(i * w, j * h, w, h, 4);
+                        } else if (this.grid[j][i] === 2) {
+                            fill(34, 197, 94);
+                            noStroke();
+                            rect(i * w, j * h, w, h, 4);
+                            fill(255, 255, 255, 100);
+                            ellipse(i * w + w/2, j * h + h/2, w/2);
+                        }
+                    }
+                }
+            }
+        }
+
+        class Player {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+            }
+
+            show() {
+                fill(56, 189, 248);
+                noStroke();
+                ellipse(this.x * w + w/2, this.y * h + h/2, w * 0.7);
+                fill(56, 189, 248, 50);
+                ellipse(this.x * w + w/2, this.y * h + h/2, w * 1.2);
+            }
+
+            move(dx, dy) {
+                const nx = this.x + dx;
+                const ny = this.y + dy;
+                if (nx >= 0 && nx < cols && ny >= 0 && ny < rows && maze.grid[ny][nx] !== 1) {
+                    this.x = nx;
+                    this.y = ny;
+                }
+            }
+
+            checkWin() {
+                return maze.grid[this.y][this.x] === 2;
+            }
+        }
+
+        function drawStartScreen() {
+            textAlign(CENTER, CENTER);
+            fill(255);
+            textSize(18);
+            text("VOICE MAZE COMMANDER", width / 2, height / 2 - 20);
+            textSize(12);
+            fill(148, 163, 184);
+            text("'오른 세 칸', '아래로 다섯 번' 처럼", width / 2, height / 2 + 15);
+            text("방향과 숫자를 함께 말해보세요!", width / 2, height / 2 + 35);
+        }
+
+        function drawCountdown() {
+            if (countdownValue !== "GO!") background(2, 6, 23);
+            textAlign(CENTER, CENTER);
+            noStroke();
+            if (countdownValue === "GO!") {
+                fill(56, 189, 248);
+                textSize(80);
+                stroke(255); strokeWeight(6);
+            } else {
+                fill(255); noStroke();
+                textSize(100);
+            }
+            text(countdownValue, width / 2, height / 2);
+        }
+
+        function drawVictoryOverlay() {
+            fill(0, 0, 0, 210);
+            rect(0, 0, width, height);
+            textAlign(CENTER, CENTER);
+            noStroke();
+            fill("#22c55e");
+            textSize(50);
+            textStyle(BOLD);
+            text("VICTORY!", width / 2, height / 2);
+            fill(255);
+            textSize(16);
+            textStyle(NORMAL);
+            text("완벽하게 탈출에 성공했습니다!", width / 2, height / 2 + 50);
+        }
+
+        async function startCountdown() {
+            isCountingDown = true;
+            isPlaying = false;
+            for (let i = 3; i > 0; i--) {
+                countdownValue = i;
+                await new Promise(r => setTimeout(r, 1000));
+            }
+            countdownValue = "GO!";
+            isPlaying = true;
+            await new Promise(r => setTimeout(r, 800));
+            isCountingDown = false;
+        }
+
+        const startBtn = document.getElementById('start-btn');
+        startBtn.onclick = () => {
+            if (isCountingDown || isPlaying) return;
+
+            if (recognition) {
+                try {
+                    recognition.start();
+                    document.getElementById('mic-status').innerText = "인식기 활성화";
+                    document.getElementById('mic-dot').classList.replace('bg-red-500', 'bg-green-500');
+                } catch(e) {}
+            } else {
+                alert("크롬 또는 지원되는 브라우저를 사용해 주세요.");
+                return;
+            }
+
+            if (isVictory) initGame();
+            startCountdown();
+        };
+
+        function windowResized() {
+            let size = Math.min(window.innerWidth - 40, 400);
+            resizeCanvas(size, size);
+            w = width / cols;
+            h = height / rows;
+        }
+    </script>
+</body>
+</html>
